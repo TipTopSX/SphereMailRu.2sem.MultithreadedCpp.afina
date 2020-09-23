@@ -17,11 +17,23 @@ namespace Backend {
  */
 class SimpleLRU : public Afina::Storage {
 public:
-    SimpleLRU(size_t max_size = 1024) : _max_size(max_size) {}
+    SimpleLRU(size_t max_size = 1024) : _max_size(max_size) {
+        _lru_head = new lru_node{"", "", nullptr, nullptr};
+        _lru_head->prev = _lru_head;
+        _lru_head->next.reset(_lru_head);
+    }
 
     ~SimpleLRU() {
         _lru_index.clear();
-        _lru_head.reset(); // TODO: Here is stack overflow
+        // TADAM: no overflow
+        auto node = _lru_head->prev;
+        while (node != _lru_head) {
+            std::swap(node->prev, node->next->prev);
+            std::swap(node->next, node->next->prev->next);
+            node->next.reset();
+            node = _lru_head->prev;
+        }
+        _lru_head->next.reset();
     }
 
     // Implements Afina::Storage interface
@@ -42,9 +54,9 @@ public:
 private:
     // LRU cache node
     using lru_node = struct lru_node {
-        std::string key;
+        const std::string key;
         std::string value;
-        std::unique_ptr<lru_node> prev;
+        lru_node *prev;
         std::unique_ptr<lru_node> next;
     };
 
@@ -56,10 +68,20 @@ private:
     // element that wasn't used for longest time.
     //
     // List owns all nodes
-    std::unique_ptr<lru_node> _lru_head;
+    lru_node *_lru_head = nullptr;
+
+    // Current size of cache
+    size_t _cache_size = 0;
 
     // Index of nodes from list above, allows fast random access to elements by lru_node#key
-    std::map<std::reference_wrapper<std::string>, std::reference_wrapper<lru_node>, std::less<std::string>> _lru_index;
+    std::map<std::reference_wrapper<const std::string>, std::reference_wrapper<lru_node>, std::less<std::string>>
+        _lru_index;
+
+    void _put_absent(const std::string &key, const std::string &value);
+
+    void _set_existing(lru_node &node, const std::string &value);
+
+    void delete_least_recent();
 };
 
 } // namespace Backend
