@@ -66,6 +66,11 @@ bool SimpleLRU::Get(const std::string &key, std::string &value) {
     auto in_cache = _lru_index.find(key);
     if (in_cache != _lru_index.end()) {
         value = in_cache->second.get().value;
+        lru_node &node = in_cache->second.get();
+        std::swap(node.prev, node.next->prev);
+        std::swap(node.next, node.next->prev->next);
+        std::swap(node.prev, _lru_head->next->prev);
+        std::swap(node.next, _lru_head->next);
         return true;
     }
     return false;
