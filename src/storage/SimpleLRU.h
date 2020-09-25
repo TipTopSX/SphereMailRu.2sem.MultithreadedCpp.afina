@@ -81,7 +81,7 @@ private:
 
     void _set_existing(lru_node &node, const std::string &value);
 
-    void delete_least_recent();
+    void _delete_least_recent();
 };
 
 } // namespace Backend

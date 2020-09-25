@@ -78,7 +78,7 @@ bool SimpleLRU::Get(const std::string &key, std::string &value) {
 
 void SimpleLRU::_put_absent(const std::string &key, const std::string &value) {
     while (_max_size - _cache_size < key.size() + value.size()) {
-        delete_least_recent();
+        _delete_least_recent();
     }
     _cache_size += key.size() + value.size();
     auto node = new lru_node{key, value, nullptr, nullptr};
@@ -96,13 +96,13 @@ void SimpleLRU::_set_existing(SimpleLRU::lru_node &node, const std::string &valu
     _cache_size -= node.value.size();
     node.value = "";
     while (_max_size - _cache_size < value.size()) {
-        delete_least_recent();
+        _delete_least_recent();
     }
     _cache_size += value.size();
     node.value = value;
 }
 
-void SimpleLRU::delete_least_recent() {
+void SimpleLRU::_delete_least_recent() {
     auto node = _lru_head->prev;
     std::swap(node->prev, node->next->prev);
     std::swap(node->next, node->next->prev->next);
