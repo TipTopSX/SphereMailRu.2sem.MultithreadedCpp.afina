@@ -6,6 +6,8 @@
 
 #include <afina/network/Server.h>
 
+#include <condition_variable>
+
 namespace spdlog {
 class logger;
 }
@@ -38,6 +40,11 @@ protected:
      */
     void OnRun();
 
+    /**
+     * Worker method for request processing
+     * */
+    void OnWorkerRun(int client_socket);
+
 private:
     // Logger instance
     std::shared_ptr<spdlog::logger> _logger;
@@ -52,6 +59,12 @@ private:
 
     // Thread to run network on
     std::thread _thread;
+
+    // Amount of currently active connections
+    int _connections = 0;
+    const int _max_connections = 5;
+    std::mutex _m_conn;
+    std::condition_variable _cv_conn;
 };
 
 } // namespace MTblocking
