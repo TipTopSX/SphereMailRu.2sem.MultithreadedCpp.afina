@@ -79,10 +79,13 @@ void ServerImpl::Start(uint16_t port, uint32_t n_accept, uint32_t n_workers) {
 // See Server.h
 void ServerImpl::Stop() {
     running.store(false);
-    shutdown(_server_socket, SHUT_RD);
-    std::unique_lock<std::mutex> lk(_m_conn);
-    _cv_conn.wait(lk, [this]{return _connections == 0;});
     shutdown(_server_socket, SHUT_RDWR);
+    {
+        std::unique_lock<std::mutex> lock(_m_client_sockets);
+        for (auto client_socket : _client_sockets) {
+            shutdown(client_socket, SHUT_RD);
+        }
+    }
 }
 
 // See Server.h
@@ -90,6 +93,8 @@ void ServerImpl::Join() {
     assert(_thread.joinable());
     _thread.join();
     close(_server_socket);
+    std::unique_lock<std::mutex> lk(_m_conn);
+    _cv_conn.wait(lk, [this]{return _connections == 0;});
 }
 
 // See Server.h
@@ -160,6 +165,10 @@ void ServerImpl::OnWorkerRun(int client_socket) {
     // - read commands until socket alive
     // - execute each command
     // - send response
+    {
+        std::unique_lock<std::mutex> lock(_m_client_sockets);
+        _client_sockets.emplace(client_socket);
+    }
     try {
         int readed_bytes;
         char client_buffer[4096];
@@ -241,9 +250,13 @@ void ServerImpl::OnWorkerRun(int client_socket) {
     }
 
     // We are done with this connection
+    {
+        std::unique_lock<std::mutex> lock(_m_client_sockets);
+        _client_sockets.erase(client_socket);
+    }
     close(client_socket);
     if (!--_connections && !running) {
-        _cv_conn.notify_one();
+        _cv_conn.notify_all();
     }
 }
 

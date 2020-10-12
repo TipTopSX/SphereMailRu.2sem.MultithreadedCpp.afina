@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <thread>
+#include <unordered_set>
 
 #include <afina/network/Server.h>
 
@@ -61,10 +62,12 @@ private:
     std::thread _thread;
 
     // Amount of currently active connections
-    int _connections = 0;
+    std::atomic<int> _connections;
     const int _max_connections = 5;
     std::mutex _m_conn;
     std::condition_variable _cv_conn;
+    std::mutex _m_client_sockets;
+    std::unordered_set<int> _client_sockets;
 };
 
 } // namespace MTblocking
