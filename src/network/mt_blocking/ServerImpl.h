@@ -62,7 +62,7 @@ private:
     std::thread _thread;
 
     // Amount of currently active connections
-    std::atomic<int> _connections;
+    std::atomic<int> _connections{0};
     const int _max_connections = 5;
     std::mutex _m_conn;
     std::condition_variable _cv_conn;
