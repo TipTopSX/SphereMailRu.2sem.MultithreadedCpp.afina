@@ -31,9 +31,9 @@ public:
         kStopped
     };
 
-    Executor(std::string name, int size, std::function<void(const std::string &msg)> &log_err_,
-             size_t min_threads = 2, size_t max_threads = 4, size_t idle_time = 3000)
-        : _name(std::move(name)), max_queue_size(size),low_watermark(min_threads), high_watermark(max_threads),
+    Executor(std::string name, int size, std::function<void(const std::string &msg)> &log_err_, size_t min_threads = 2,
+             size_t max_threads = 4, size_t idle_time = 3000)
+        : _name(std::move(name)), max_queue_size(size), low_watermark(min_threads), high_watermark(max_threads),
           idle_time(idle_time) {
         log_err = log_err_;
         std::unique_lock<std::mutex> lock(this->mutex);
@@ -58,15 +58,10 @@ public:
         state = State::kStopping;
         std::unique_lock<std::mutex> lock(this->mutex);
         empty_condition.notify_all();
-        for (auto &thread : threads) {
-            if (await) {
-                thread.join();
-            } else {
-                thread.detach();
-            }
+        tasks.clear();
+        if (await) {
+            no_more_threads.wait(lock, [&, this] { return this->threads.empty(); });
         }
-        threads.clear();
-        state = State::kStopped;
     };
 
     /**
@@ -107,21 +102,32 @@ private:
      * Main function that all pool threads are running. It polls internal task queue and execute tasks
      */
     friend void perform(Executor *executor) {
+        std::function<void()> task;
+        auto finish_thread = [executor] {
+            auto this_thread = std::this_thread::get_id();
+            for (auto it = executor->threads.begin(); it < executor->threads.end(); ++it) {
+                if (it->get_id() == this_thread) {
+                    auto self = std::move(*it);
+                    self.detach();
+                    executor->threads.erase(it);
+                    if (executor->threads.empty()) {
+                        executor->state = State::kStopped;
+                        executor->no_more_threads.notify_all();
+                    }
+                    return;
+                }
+            }
+        };
+
         while (executor->state == Executor::State::kRun) {
-            std::function<void()> task;
             {
                 std::unique_lock<std::mutex> lock(executor->mutex);
                 while (executor->tasks.empty()) {
                     executor->empty_condition.wait_for(lock, std::chrono::milliseconds(executor->idle_time));
-                    if (executor->tasks.empty() && executor->threads.size() > executor->low_watermark) {
-                        auto this_thread = std::this_thread::get_id();
-                        for (auto it = executor->threads.begin(); it < executor->threads.end(); ++it) {
-                            if (it->get_id() == this_thread) {
-                                auto self = std::move(*it);
-                                executor->threads.erase(it);
-                                return;
-                            }
-                        }
+                    if ((executor->tasks.empty() && executor->threads.size() > executor->low_watermark) ||
+                        executor->state != Executor::State::kRun) {
+                        finish_thread();
+                        return;
                     }
                 }
                 task = std::move(executor->tasks.front());
@@ -138,6 +144,7 @@ private:
                 executor->log_err("Unknown exception");
             }
         }
+        finish_thread();
     };
 
     /**
@@ -190,7 +197,10 @@ private:
      */
     std::string _name;
 
-    std::thread dispatcher;
+    /**
+     * Conditional variable to await executor stop
+     */
+    std::condition_variable no_more_threads;
 };
 
 } // namespace Concurrency
