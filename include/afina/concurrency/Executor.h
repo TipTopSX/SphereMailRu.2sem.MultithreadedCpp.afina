@@ -31,9 +31,11 @@ public:
         kStopped
     };
 
-    Executor(std::string name, int size, size_t min_threads = 2, size_t max_threads = 4, size_t idle_time = 3000)
-        : _name(std::move(name)), max_queue_size(size), low_watermark(min_threads), high_watermark(max_threads),
+    Executor(std::string name, int size, std::function<void(const std::string &msg)> &log_err_,
+             size_t min_threads = 2, size_t max_threads = 4, size_t idle_time = 3000)
+        : _name(std::move(name)), max_queue_size(size),low_watermark(min_threads), high_watermark(max_threads),
           idle_time(idle_time) {
+        log_err = log_err_;
         std::unique_lock<std::mutex> lock(this->mutex);
         for (int i = 0; i < low_watermark; ++i) {
             threads.emplace_back(std::thread([this] { return perform(this); }));
@@ -99,6 +101,8 @@ private:
     Executor &operator=(const Executor &); // = delete;
     Executor &operator=(Executor &&);      // = delete;
 
+    std::function<void(const std::string &msg)> log_err;
+
     /**
      * Main function that all pool threads are running. It polls internal task queue and execute tasks
      */
@@ -109,7 +113,7 @@ private:
                 std::unique_lock<std::mutex> lock(executor->mutex);
                 while (executor->tasks.empty()) {
                     executor->empty_condition.wait_for(lock, std::chrono::milliseconds(executor->idle_time));
-                    if (!executor->tasks.empty() && executor->threads.size() > executor->low_watermark) {
+                    if (executor->tasks.empty() && executor->threads.size() > executor->low_watermark) {
                         auto this_thread = std::this_thread::get_id();
                         for (auto it = executor->threads.begin(); it < executor->threads.end(); ++it) {
                             if (it->get_id() == this_thread) {
@@ -124,7 +128,15 @@ private:
                 executor->tasks.pop_front();
                 executor->cur_queue_size--;
             }
-            task();
+            try {
+                task();
+            } catch (const std::exception &ex) {
+                executor->log_err(ex.what());
+            } catch (const std::string &ex) {
+                executor->log_err(ex);
+            } catch (...) {
+                executor->log_err("Unknown exception");
+            }
         }
     };
 
