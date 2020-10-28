@@ -97,6 +97,7 @@ void Worker::OnRun() {
                 pconn->OnError();
             } else if (current_event.events & EPOLLRDHUP) {
                 _logger->debug("Got EPOLLRDHUP, value of returned events: {}", current_event.events);
+                close(pconn->_socket);
                 pconn->OnClose();
             } else {
                 // Depends on what connection wants...
@@ -125,6 +126,7 @@ void Worker::OnRun() {
                 if (epoll_ctl(_epoll_fd, EPOLL_CTL_DEL, pconn->_socket, &pconn->_event)) {
                     std::cerr << "Failed to delete connection!" << std::endl;
                 }
+                close(pconn->_socket);
                 delete pconn;
             }
         }
