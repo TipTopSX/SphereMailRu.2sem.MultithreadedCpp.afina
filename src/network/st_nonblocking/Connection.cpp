@@ -19,13 +19,13 @@ void Connection::Start() {
 
 // See Connection.h
 void Connection::OnError() {
-    _running = false;
+    _running.store(false);
     _logger->error("Error on socket {}", _socket);
 }
 
 // See Connection.h
 void Connection::OnClose() {
-    _running = false;
+    _running.store(false);
     _logger->debug("Closed connection on socket {}", _socket);
 }
 
@@ -131,7 +131,7 @@ void Connection::DoWrite() {
         if (_output.empty()) {
             _event.events &= !EPOLLOUT;
             if (_eof) {
-                _running = false;
+                _running.store(false);
             }
         }
     } catch (std::runtime_error &ex) {
