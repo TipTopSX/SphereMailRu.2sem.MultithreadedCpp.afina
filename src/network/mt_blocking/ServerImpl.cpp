@@ -18,6 +18,7 @@
 #include <spdlog/logger.h>
 
 #include <afina/Storage.h>
+#include <afina/concurrency/Executor.h>
 #include <afina/execute/Command.h>
 #include <afina/logging/Service.h>
 
@@ -94,7 +95,7 @@ void ServerImpl::Join() {
     _thread.join();
     close(_server_socket);
     std::unique_lock<std::mutex> lk(_m_conn);
-    _cv_conn.wait(lk, [this]{return _connections == 0;});
+    _cv_conn.wait(lk, [this] { return _connections == 0; });
 }
 
 // See Server.h
@@ -107,6 +108,10 @@ void ServerImpl::OnRun() {
     Protocol::Parser parser;
     std::string argument_for_command;
     std::unique_ptr<Execute::Command> command_to_execute;
+    std::function<void(const std::string &)> err_log = [&, this](const std::string &msg) {
+        return this->_logger->error(msg);
+    };
+    Afina::Concurrency::Executor executor{"ClientSockets", 16, err_log};
     while (running.load()) {
         _logger->debug("waiting for connection...");
 
@@ -142,8 +147,12 @@ void ServerImpl::OnRun() {
         // TODO: Start new thread and process data from/to connection
         {
             if (running && _connections++ < _max_connections) {
-                auto new_thread = std::thread(&ServerImpl::OnWorkerRun, this, client_socket);
-                new_thread.detach();
+                void (ServerImpl::*func)(int);
+                func = &ServerImpl::OnWorkerRun;
+                if (!executor.Execute(func, this, client_socket)) {
+                    close(client_socket);
+                    _connections--;
+                }
             } else {
                 close(client_socket);
                 _connections--;
@@ -154,7 +163,6 @@ void ServerImpl::OnRun() {
     // Cleanup on exit...
     _logger->warn("Network stopped");
 }
-
 
 void ServerImpl::OnWorkerRun(int client_socket) {
     std::size_t arg_remains;
