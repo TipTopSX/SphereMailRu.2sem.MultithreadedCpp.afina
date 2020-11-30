@@ -12,7 +12,6 @@ namespace STnonblock {
 // See Connection.h
 void Connection::Start() {
     _event.events = EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLRDHUP;
-    _event.data.fd = _socket;
     _event.data.ptr = this;
     _logger->debug("Started connection on socket {}", _socket);
 }
@@ -109,35 +108,29 @@ void Connection::DoRead() {
             throw std::runtime_error(std::string(strerror(errno)));
         }
     } catch (std::runtime_error &ex) {
-        if (errno == EAGAIN) {
-            _eof = true;
-        } else {
-            _logger->error("Failed to read connection on descriptor {}: {}", _socket, ex.what());
-        }
+        _logger->error("Failed to read connection on descriptor {}: {}", _socket, ex.what());
     }
 }
 
 // See Connection.h
 void Connection::DoWrite() {
+    size_t sent_total = 0;
     _logger->debug("Writing on socket {}", _socket);
-    try {
-        while (!_output.empty()) {
-            auto result = _output.front();
-            if (send(_socket, result.data(), result.size(), 0) <= 0) {
-                throw std::runtime_error("Failed to send response");
+    while (!_output.empty()) {
+        auto result = _output.front();
+        auto sent = send(_socket, result.data() + sent_total, result.size() - sent_total, 0);
+        if (sent > 0) {
+            sent_total += sent;
+            if (result.size() == sent_total) {
+                _output.pop_front();
+                sent_total = 0;
             }
-            _output.pop_front();
+        } else {
+            break;
         }
-        if (_output.empty()) {
-            _event.events &= !EPOLLOUT;
-            if (_eof) {
-                _running = false;
-            }
-        }
-    } catch (std::runtime_error &ex) {
-        if (errno != EAGAIN) {
-            _logger->error("Failed to write connection on descriptor {}: {}", _socket, ex.what());
-        }
+    }
+    if (_output.empty()) {
+        _event.events &= !EPOLLOUT;
     }
 }
 
