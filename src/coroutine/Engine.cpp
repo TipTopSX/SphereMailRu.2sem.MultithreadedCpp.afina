@@ -1,7 +1,6 @@
 #include <afina/coroutine/Engine.h>
 
 #include <csetjmp>
-#include <cstdio>
 #include <cstring>
 
 namespace Afina {
@@ -61,6 +60,60 @@ void Engine::sched(void *routine_) {
     }
     cur_routine = (context *)routine_;
     Restore(*(context *)routine_);
+}
+
+void Engine::block(void *routine_) {
+    auto routine = cur_routine;
+    if (routine_) {
+        routine = (context *)routine_;
+    }
+    if (routine && !routine->blocked) {
+        routine->blocked = true;
+        // Remove from alive
+        if (routine->prev) {
+            routine->prev->next = routine->next;
+        }
+        if (routine->next) {
+            routine->next->prev = routine->prev;
+        }
+        // Move to blocked
+        if (blocked) {
+            blocked->prev = routine;
+        }
+        routine->next = blocked;
+        routine->prev = nullptr;
+        blocked = routine;
+        if (routine == cur_routine) {
+            if (cur_routine && cur_routine != idle_ctx) {
+                if (setjmp(cur_routine->Environment) > 0) {
+                    return;
+                }
+                Store(*cur_routine);
+            }
+            cur_routine = nullptr;
+            Restore(*idle_ctx);
+        }
+    }
+}
+
+void Engine::unblock(void *routine_) {
+    auto routine = (context *)routine_;
+    if (routine && routine->blocked) {
+        // Remove from blocked
+        if (routine->prev) {
+            routine->prev->next = routine->next;
+        }
+        if (routine->next) {
+            routine->next->prev = routine->prev;
+        }
+        // Move to alive
+        if (alive) {
+            alive->prev = routine;
+        }
+        routine->next = alive;
+        routine->prev = nullptr;
+        alive = routine;
+    }
 }
 
 } // namespace Coroutine

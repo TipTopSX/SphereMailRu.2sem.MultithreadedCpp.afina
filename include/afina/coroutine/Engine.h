@@ -6,6 +6,7 @@
 #include <iostream>
 #include <map>
 #include <tuple>
+#include <utility>
 
 #include <setjmp.h>
 
@@ -18,9 +19,8 @@ namespace Coroutine {
  */
 class Engine final {
 public:
-    using unblocker_func = std::function<void(Engine &)>;
+    using unblocker_func = std::function<void()>;
 
-private:
     /**
      * A single coroutine instance which could be scheduled for execution
      * should be allocated on heap
@@ -42,17 +42,20 @@ private:
         // To include routine in the different lists, such as "alive", "blocked", e.t.c
         struct context *prev = nullptr;
         struct context *next = nullptr;
-    } context;
 
-    /**
-     * Where coroutines stack begins
-     */
-    char *StackBottom;
+        bool blocked{false};
+    } context;
 
     /**const int&
      * Current coroutine
      */
     context *cur_routine;
+
+private:
+    /**
+     * Where coroutines stack begins
+     */
+    char *StackBottom;
 
     /**
      * List of routines ready to be scheduled. Note that suspended routine ends up here as well
@@ -88,8 +91,8 @@ protected:
     static void null_unblocker(Engine &) {}
 
 public:
-    Engine(unblocker_func unblocker = null_unblocker)
-        : StackBottom(0), cur_routine(nullptr), alive(nullptr), _unblocker(unblocker) {}
+    Engine(unblocker_func unblocker)
+        : StackBottom(0), cur_routine(nullptr), alive(nullptr), _unblocker(std::move(unblocker)) {}
     Engine(Engine &&) = delete;
     Engine(const Engine &) = delete;
 
@@ -123,7 +126,7 @@ public:
     /**
      * Put coroutine back to list of alive, so that it could be scheduled later
      */
-    void unblock(void *coro);
+    void unblock(void *routine_);
 
     /**
      * Entry point into the engine. Prepare all internal mechanics and starts given function which is
@@ -146,7 +149,7 @@ public:
         idle_ctx = new context();
         if (setjmp(idle_ctx->Environment) > 0) {
             if (alive == nullptr) {
-                _unblocker(*this);
+                _unblocker();
             }
 
             // Here: correct finish of the coroutine section
@@ -226,6 +229,8 @@ public:
 
         return pc;
     }
+
+    bool is_blocked() { return blocked && !alive; }
 };
 
 } // namespace Coroutine
