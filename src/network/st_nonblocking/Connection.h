@@ -23,22 +23,23 @@ public:
         _event.data.ptr = this;
     }
 
-    inline bool isAlive() const { return _running; }
+    virtual inline bool isAlive() const { return _running; }
 
-    void Start();
+    virtual void Start();
 
 protected:
     void OnError();
     void OnClose();
-    void DoRead();
-    void DoWrite();
+    virtual void DoRead();
+    virtual void DoWrite();
+
+    struct epoll_event _event;
+    int _socket;
 
 private:
     friend class ServerImpl;
 
-    int _socket;
-    struct epoll_event _event;
-    bool _running{true};
+    std::atomic<bool> _running{true};
 
     std::shared_ptr<spdlog::logger> _logger;
     std::shared_ptr<Afina::Storage> _pStorage;

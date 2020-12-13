@@ -9,7 +9,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/in.h>
-#include <signal.h>
+#include <csignal>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/socket.h>
@@ -193,7 +193,7 @@ void ServerImpl::OnRun() {
                 }
 
                 // Register the new FD to be monitored by epoll.
-                Connection *pc = new Connection(infd);
+                Connection *pc = new Connection(infd, _logger, pStorage);
                 if (pc == nullptr) {
                     throw std::runtime_error("Failed to allocate connection");
                 }
