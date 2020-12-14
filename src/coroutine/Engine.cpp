@@ -10,7 +10,6 @@ namespace Coroutine {
 void Engine::Store(context &ctx) {
     char currentStack;
 
-    ctx.Hight = ctx.Low = StackBottom;
     if (&currentStack > StackBottom) {
         ctx.Hight = &currentStack;
     } else {
@@ -39,7 +38,7 @@ void Engine::Restore(context &ctx) {
 
 void Engine::yield() {
     auto it = alive;
-    while (it && it == cur_routine) {
+    if (it && it == cur_routine) {
         it = it->next;
     }
 
@@ -50,7 +49,7 @@ void Engine::yield() {
 
 void Engine::sched(void *routine_) {
     if (!routine_ || routine_ == cur_routine) {
-        return;
+        return yield();
     }
 
     if (cur_routine) {
