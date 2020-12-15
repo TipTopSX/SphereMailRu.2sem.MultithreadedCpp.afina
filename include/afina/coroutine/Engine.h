@@ -7,7 +7,7 @@
 #include <map>
 #include <tuple>
 
-#include <setjmp.h>
+#include <csetjmp>
 
 namespace Afina {
 namespace Coroutine {
@@ -144,6 +144,7 @@ public:
         void *pc = run(main, std::forward<Ta>(args)...);
 
         idle_ctx = new context();
+        idle_ctx->Low = idle_ctx->Hight = StackBottom;
         if (setjmp(idle_ctx->Environment) > 0) {
             if (alive == nullptr) {
                 _unblocker(*this);
@@ -166,13 +167,19 @@ public:
      * errors function returns -1
      */
     template <typename... Ta> void *run(void (*func)(Ta...), Ta &&... args) {
+        char currentBottom;
+        run_impl(&currentBottom, func, std::forward<Ta>(args)...);
+    }
+
+    template <typename... Ta> void *run_impl(char *currentBottom, void (*func)(Ta...), Ta &&... args) {
         if (this->StackBottom == 0) {
             // Engine wasn't initialized yet
             return nullptr;
         }
 
         // New coroutine context that carries around all information enough to call function
-        context *pc = new context();
+        auto pc = new context();
+        pc->Low = pc->Hight = currentBottom;
 
         // Store current state right here, i.e just before enter new coroutine, later, once it gets scheduled
         // execution starts here. Note that we have to acquire stack of the current function call to ensure
