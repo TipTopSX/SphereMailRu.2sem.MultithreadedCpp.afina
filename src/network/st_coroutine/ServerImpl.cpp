@@ -7,9 +7,9 @@
 #include <stdexcept>
 
 #include <arpa/inet.h>
+#include <csignal>
 #include <netdb.h>
 #include <netinet/in.h>
-#include <signal.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/socket.h>
@@ -29,7 +29,8 @@ namespace Network {
 namespace STcoroutine {
 
 // See Server.h
-ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl) : Server(ps, pl) {}
+ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl)
+    : Server(ps, pl), _engine([this] { this->unblocker(); }) {}
 
 // See Server.h
 ServerImpl::~ServerImpl() {}
@@ -37,7 +38,7 @@ ServerImpl::~ServerImpl() {}
 // See Server.h
 void ServerImpl::Start(uint16_t port, uint32_t n_acceptors, uint32_t n_workers) {
     _logger = pLogging->select("network");
-    _logger->info("Start st_nonblocking network service");
+    _logger->info("Start st_coroutine network service");
 
     sigset_t sig_mask;
     sigemptyset(&sig_mask);
@@ -80,7 +81,8 @@ void ServerImpl::Start(uint16_t port, uint32_t n_acceptors, uint32_t n_workers) 
         throw std::runtime_error("Failed to create epoll file descriptor: " + std::string(strerror(errno)));
     }
 
-    _work_thread = std::thread(&ServerImpl::OnRun, this);
+    _work_thread = std::thread(
+        [this] { this->_engine.start(static_cast<void (*)(ServerImpl *)>([](ServerImpl *s) { s->OnRun(); }), this); });
 }
 
 // See Server.h
@@ -149,10 +151,10 @@ void ServerImpl::OnRun() {
             } else {
                 // Depends on what connection wants...
                 if (current_event.events & EPOLLIN) {
-                    pc->DoRead();
+                    _engine.sched(pc->ctx_read);
                 }
                 if (current_event.events & EPOLLOUT) {
-                    pc->DoWrite();
+                    _engine.sched(pc->ctx_write);
                 }
             }
 
@@ -207,18 +209,36 @@ void ServerImpl::OnNewConnection(int epoll_descr) {
         }
 
         // Register the new FD to be monitored by epoll.
-        Connection *pc = new (std::nothrow) Connection(infd);
+        Connection *pc = new (std::nothrow) Connection(infd, epoll_descr, &_engine, _logger, pStorage);
         if (pc == nullptr) {
             throw std::runtime_error("Failed to allocate connection");
         }
 
         // Register connection in worker's epoll
         pc->Start();
+        pc->ctx_read = static_cast<Afina::Coroutine::Engine::context *>(
+            _engine.run(static_cast<void (*)(Connection *)>([](Connection *pc) { pc->DoRead(); }), (Connection *)pc));
+        pc->ctx_write = static_cast<Afina::Coroutine::Engine::context *>(
+            _engine.run(static_cast<void (*)(Connection *)>([](Connection *pc) { pc->DoWrite(); }), (Connection *)pc));
+
         if (pc->isAlive()) {
             if (epoll_ctl(epoll_descr, EPOLL_CTL_ADD, pc->_socket, &pc->_event)) {
                 pc->OnError();
                 delete pc;
             }
+        }
+    }
+}
+
+void ServerImpl::unblocker() {
+    std::array<struct epoll_event, 64> mod_list{};
+    while (_engine.is_blocked()) {
+        int nmod = epoll_wait(_epoll_descr, &mod_list[0], mod_list.size(), -1);
+        for (auto i = 0; i < nmod; ++i) {
+            struct epoll_event &current_event = mod_list[i];
+            auto *pc = (Connection *)(current_event.data.ptr);
+            _engine.unblock(pc->ctx_read);
+            _engine.unblock(pc->ctx_write);
         }
     }
 }

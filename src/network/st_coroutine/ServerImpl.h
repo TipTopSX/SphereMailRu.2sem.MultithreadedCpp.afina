@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <afina/network/Server.h>
+#include <afina/coroutine/Engine.h>
 
 namespace spdlog {
 class logger;
@@ -53,9 +54,16 @@ private:
 
     // Curstom event "device" used to wakeup workers
     int _event_fd;
+    int _epoll_descr;
 
     // IO thread
     std::thread _work_thread;
+
+    // Coroutine engine
+    Afina::Coroutine::Engine _engine;
+
+    // Function to run when there is no more alive coroutines
+    void unblocker();
 };
 
 } // namespace STcoroutine
